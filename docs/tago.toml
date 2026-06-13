@@ -1,0 +1,10 @@
+title       = "mvn"
+baseURL     = "https://maven-cli.tamnd.com/"
+description = "Search Maven Central artifacts"
+contentDir  = "content"
+outputDir   = "public"
+theme       = "tago-doks"
+syntaxHighlight = "true"
+
+[params]
+github = "https://github.com/tamnd/maven-cli"
