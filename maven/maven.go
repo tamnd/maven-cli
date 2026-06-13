@@ -1,52 +1,76 @@
 // Package maven is the library behind the mvn command line:
-// the HTTP client, request shaping, and the typed data models for maven.
+// the HTTP client, request shaping, and the typed data models for Maven Central.
 //
 // The Client here is the spine every command shares. It sets a real
 // User-Agent, paces requests so a busy session stays polite, and retries the
-// transient failures (429 and 5xx) that any public site throws under load.
-// Build your endpoint calls and JSON decoding on top of it.
+// transient failures (429 and 5xx) that any public API throws under load.
 package maven
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
-// DefaultUserAgent identifies the client to maven. A real, honest
-// User-Agent is both polite and the thing most likely to keep you unblocked.
+const defaultBaseURL = "https://search.maven.org"
+
+// DefaultUserAgent identifies the client to Maven Central.
 const DefaultUserAgent = "mvn/dev (+https://github.com/tamnd/maven-cli)"
 
-// Client talks to maven over HTTP.
-type Client struct {
-	HTTP      *http.Client
+// Config holds constructor parameters.
+type Config struct {
+	BaseURL   string
 	UserAgent string
-	// Rate is the minimum gap between requests. Zero means no pacing.
-	Rate    time.Duration
-	Retries int
-
-	last time.Time
+	Rate      time.Duration
+	Retries   int
+	Timeout   time.Duration
 }
 
-// NewClient returns a Client with sensible defaults: a 30s timeout, a 200ms
-// minimum gap between requests, and five retries on transient errors.
-func NewClient() *Client {
-	return &Client{
-		HTTP:      &http.Client{Timeout: 30 * time.Second},
+// DefaultConfig returns sensible defaults.
+func DefaultConfig() Config {
+	return Config{
+		BaseURL:   defaultBaseURL,
 		UserAgent: DefaultUserAgent,
 		Rate:      200 * time.Millisecond,
 		Retries:   5,
+		Timeout:   30 * time.Second,
 	}
 }
 
-// Get fetches url and returns the response body. It paces and retries according
-// to the client's settings. The caller owns nothing extra; the body is read
-// fully and closed here.
-func (c *Client) Get(ctx context.Context, url string) ([]byte, error) {
+// Client talks to Maven Central over HTTP.
+type Client struct {
+	http      *http.Client
+	userAgent string
+	baseURL   string
+	rate      time.Duration
+	retries   int
+	last      time.Time
+}
+
+// NewClient returns a Client with the given config.
+func NewClient(cfg Config) *Client {
+	base := cfg.BaseURL
+	if base == "" {
+		base = defaultBaseURL
+	}
+	return &Client{
+		http:      &http.Client{Timeout: cfg.Timeout},
+		userAgent: cfg.UserAgent,
+		baseURL:   strings.TrimRight(base, "/"),
+		rate:      cfg.Rate,
+		retries:   cfg.Retries,
+	}
+}
+
+// Get fetches rawURL and returns the response body.
+func (c *Client) Get(ctx context.Context, rawURL string) ([]byte, error) {
 	var lastErr error
-	for attempt := 0; attempt <= c.Retries; attempt++ {
+	for attempt := 0; attempt <= c.retries; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
@@ -54,7 +78,7 @@ func (c *Client) Get(ctx context.Context, url string) ([]byte, error) {
 			case <-time.After(backoff(attempt)):
 			}
 		}
-		body, retry, err := c.do(ctx, url)
+		body, retry, err := c.do(ctx, rawURL)
 		if err == nil {
 			return body, nil
 		}
@@ -63,18 +87,19 @@ func (c *Client) Get(ctx context.Context, url string) ([]byte, error) {
 			return nil, err
 		}
 	}
-	return nil, fmt.Errorf("get %s: %w", url, lastErr)
+	return nil, fmt.Errorf("get %s: %w", rawURL, lastErr)
 }
 
-func (c *Client) do(ctx context.Context, url string) (body []byte, retry bool, err error) {
+func (c *Client) do(ctx context.Context, rawURL string) (body []byte, retry bool, err error) {
 	c.pace()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, false, err
 	}
-	req.Header.Set("User-Agent", c.UserAgent)
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, true, err
 	}
@@ -87,19 +112,18 @@ func (c *Client) do(ctx context.Context, url string) (body []byte, retry bool, e
 		return nil, false, fmt.Errorf("http %d", resp.StatusCode)
 	}
 
-	b, err := io.ReadAll(resp.Body)
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, true, err
 	}
 	return b, false, nil
 }
 
-// pace blocks until at least Rate has passed since the previous request.
 func (c *Client) pace() {
-	if c.Rate <= 0 {
+	if c.rate <= 0 {
 		return
 	}
-	if wait := c.Rate - time.Since(c.last); wait > 0 {
+	if wait := c.rate - time.Since(c.last); wait > 0 {
 		time.Sleep(wait)
 	}
 	c.last = time.Now()
@@ -111,4 +135,151 @@ func backoff(attempt int) time.Duration {
 		d = 5 * time.Second
 	}
 	return d
+}
+
+func (c *Client) getJSON(ctx context.Context, rawURL string, v any) error {
+	body, err := c.Get(ctx, rawURL)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(body, v); err != nil {
+		return fmt.Errorf("decode %s: %w", rawURL, err)
+	}
+	return nil
+}
+
+// ─── wire types ──────────────────────────────────────────────────────────────
+
+type solrResponse struct {
+	ResponseHeader struct {
+		Status int `json:"status"`
+	} `json:"responseHeader"`
+	Response struct {
+		NumFound int       `json:"numFound"`
+		Start    int       `json:"start"`
+		Docs     []solrDoc `json:"docs"`
+	} `json:"response"`
+}
+
+type solrDoc struct {
+	ID             string `json:"id"`
+	G              string `json:"g"`
+	A              string `json:"a"`
+	LatestVersion  string `json:"latestVersion"`
+	V              string `json:"v"`
+	P              string `json:"p"`
+	Timestamp      int64  `json:"timestamp"`
+	VersionCount   int    `json:"versionCount"`
+}
+
+// ─── Search ──────────────────────────────────────────────────────────────────
+
+// Search queries Maven Central and returns up to limit artifacts.
+func (c *Client) Search(ctx context.Context, query string, limit int) ([]Artifact, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	params := url.Values{}
+	params.Set("q", query)
+	params.Set("rows", fmt.Sprintf("%d", limit))
+	params.Set("wt", "json")
+
+	rawURL := c.baseURL + "/solrsearch/select?" + params.Encode()
+	var resp solrResponse
+	if err := c.getJSON(ctx, rawURL, &resp); err != nil {
+		return nil, err
+	}
+
+	out := make([]Artifact, 0, len(resp.Response.Docs))
+	for _, d := range resp.Response.Docs {
+		out = append(out, docToArtifact(d))
+	}
+	return out, nil
+}
+
+// Artifact fetches the latest info for a specific groupId:artifactId.
+func (c *Client) Artifact(ctx context.Context, groupID, artifactID string) (Artifact, error) {
+	q := fmt.Sprintf("g:%s+AND+a:%s", groupID, artifactID)
+	params := url.Values{}
+	params.Set("q", q)
+	params.Set("rows", "1")
+	params.Set("wt", "json")
+
+	rawURL := c.baseURL + "/solrsearch/select?" + params.Encode()
+	var resp solrResponse
+	if err := c.getJSON(ctx, rawURL, &resp); err != nil {
+		return Artifact{}, err
+	}
+	if len(resp.Response.Docs) == 0 {
+		return Artifact{}, fmt.Errorf("artifact %s:%s not found", groupID, artifactID)
+	}
+	return docToArtifact(resp.Response.Docs[0]), nil
+}
+
+// Versions lists available versions for a specific groupId:artifactId.
+func (c *Client) Versions(ctx context.Context, groupID, artifactID string, limit int) ([]Version, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	q := fmt.Sprintf("g:%s+AND+a:%s", groupID, artifactID)
+	params := url.Values{}
+	params.Set("q", q)
+	params.Set("core", "gav")
+	params.Set("rows", fmt.Sprintf("%d", limit))
+	params.Set("wt", "json")
+
+	rawURL := c.baseURL + "/solrsearch/select?" + params.Encode()
+	var resp solrResponse
+	if err := c.getJSON(ctx, rawURL, &resp); err != nil {
+		return nil, err
+	}
+
+	out := make([]Version, 0, len(resp.Response.Docs))
+	for _, d := range resp.Response.Docs {
+		out = append(out, docToVersion(d, groupID, artifactID))
+	}
+	return out, nil
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+func artifactURL(groupID, artifactID string) string {
+	return "https://central.sonatype.com/artifact/" + groupID + "/" + artifactID
+}
+
+func fmtTimestamp(ms int64) string {
+	if ms == 0 {
+		return ""
+	}
+	return time.UnixMilli(ms).UTC().Format("2006-01-02")
+}
+
+func docToArtifact(d solrDoc) Artifact {
+	g := d.G
+	a := d.A
+	if g == "" || a == "" {
+		// parse from id field "g:a"
+		parts := strings.SplitN(d.ID, ":", 2)
+		if len(parts) == 2 {
+			g = parts[0]
+			a = parts[1]
+		}
+	}
+	return Artifact{
+		GroupID:       g,
+		ArtifactID:    a,
+		LatestVersion: d.LatestVersion,
+		Packaging:     d.P,
+		LastUpdated:   fmtTimestamp(d.Timestamp),
+		VersionCount:  d.VersionCount,
+		URL:           artifactURL(g, a),
+	}
+}
+
+func docToVersion(d solrDoc, groupID, artifactID string) Version {
+	return Version{
+		Version:     d.V,
+		LastUpdated: fmtTimestamp(d.Timestamp),
+		URL:         artifactURL(groupID, artifactID) + "/" + d.V,
+	}
 }
