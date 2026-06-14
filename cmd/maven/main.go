@@ -1,4 +1,4 @@
-// Command mvn is a single-binary command line for maven.
+// Command maven is a single-binary command line for Maven Central.
 package main
 
 import (

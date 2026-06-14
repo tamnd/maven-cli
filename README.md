@@ -1,45 +1,44 @@
-# mvn
+# maven
 
 Search Maven Central artifacts
 
-`mvn` is a single pure-Go binary. It speaks to maven over plain
+`maven` is a single pure-Go binary. It speaks to Maven Central over plain
 HTTPS, shapes the responses into clean records, and pipes into the rest of your
 tools. No API key, nothing to run alongside it.
 
 ## Install
 
 ```bash
-go install github.com/tamnd/maven-cli/cmd/mvn@latest
+go install github.com/tamnd/maven-cli/cmd/maven@latest
 ```
 
 Or grab a prebuilt binary from the [releases](https://github.com/tamnd/maven-cli/releases), or run
 the container image:
 
 ```bash
-docker run --rm ghcr.io/tamnd/mvn:latest --help
+docker run --rm ghcr.io/tamnd/maven:latest --help
 ```
 
 ## Usage
 
 ```bash
-mvn --help
-mvn version
+maven --help
+maven search "spring core"
+maven info org.springframework spring-core
+maven versions org.springframework spring-core --limit 20
 ```
-
-This is a fresh scaffold. The command tree starts with `version`; build out the
-real commands in `cli/` on top of the `maven` library package.
 
 ## Development
 
 ```
-cmd/mvn/   thin main, wires cli.Root into fang
-cli/                 the cobra command tree
-maven/                the library: HTTP client and data models
-docs/                tago documentation site
+cmd/maven/  thin main, wires cli.Root into fang
+cli/        the cobra command tree
+maven/      the library: HTTP client and data models
+docs/       tago documentation site
 ```
 
 ```bash
-make build      # ./bin/mvn
+make build      # ./bin/maven
 make test       # go test ./...
 make vet        # go vet ./...
 ```
@@ -51,7 +50,7 @@ archives, Linux packages, the multi-arch GHCR image, checksums, SBOMs, and a
 cosign signature:
 
 ```bash
-git tag v0.1.0
+git tag v0.1.1
 git push --tags
 ```
 

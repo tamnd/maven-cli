@@ -9,16 +9,16 @@
 # image; each manager lights up the moment its repository and token exist.
 version: 2
 
-project_name: mvn
+project_name: maven
 
 before:
   hooks:
     - go mod download
 
 builds:
-  - id: mvn
-    binary: mvn
-    main: ./cmd/mvn
+  - id: maven
+    binary: maven
+    main: ./cmd/maven
     env:
       - CGO_ENABLED=0
     flags:
@@ -43,7 +43,7 @@ builds:
 
 archives:
   - id: default
-    name_template: "mvn_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}"
+    name_template: "maven_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}"
     format_overrides:
       - goos: windows
         formats: [zip]
@@ -53,7 +53,7 @@ archives:
 
 nfpms:
   - id: linux-packages
-    package_name: mvn
+    package_name: maven
     file_name_template: "{{ .ConventionalFileName }}"
     vendor: tamnd
     homepage: https://github.com/tamnd/maven-cli
@@ -68,11 +68,11 @@ nfpms:
     section: utils
     contents:
       - src: ./LICENSE
-        dst: /usr/share/doc/mvn/LICENSE
+        dst: /usr/share/doc/maven/LICENSE
 
 dockers_v2:
   - images:
-      - ghcr.io/tamnd/mvn
+      - ghcr.io/tamnd/maven
     tags:
       - "{{ .Version }}"
       - latest
@@ -90,7 +90,7 @@ dockers_v2:
       org.opencontainers.image.licenses: "Apache-2.0"
 
 homebrew_casks:
-  - name: mvn
+  - name: maven
     repository:
       owner: tamnd
       name: homebrew-tap

@@ -12,10 +12,10 @@ ARG TARGETPLATFORM
 
 # ca-certificates for HTTPS; tzdata for sane timestamps.
 RUN apk add --no-cache ca-certificates tzdata \
- && adduser -D -H -u 10001 mvn
+ && adduser -D -H -u 10001 maven
 
-COPY $TARGETPLATFORM/mvn /usr/bin/mvn
+COPY $TARGETPLATFORM/maven /usr/bin/maven
 
-USER mvn
+USER maven
 
-ENTRYPOINT ["/usr/bin/mvn"]
+ENTRYPOINT ["/usr/bin/maven"]

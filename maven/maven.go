@@ -20,7 +20,7 @@ import (
 const defaultBaseURL = "https://search.maven.org"
 
 // DefaultUserAgent identifies the client to Maven Central.
-const DefaultUserAgent = "mvn/dev (+https://github.com/tamnd/maven-cli)"
+const DefaultUserAgent = "maven-cli/0.1.0 (github.com/tamnd/maven-cli)"
 
 // Config holds constructor parameters.
 type Config struct {

@@ -59,12 +59,12 @@ func Root() *cobra.Command {
 	app := &App{cfg: maven.DefaultConfig()}
 
 	root := &cobra.Command{
-		Use:   "mvn",
+		Use:   "maven",
 		Short: "Search Maven Central artifacts",
-		Long: `mvn searches Maven Central through the Solr search API.
+		Long: `maven searches Maven Central through the Solr search API.
 No API key is required. It returns records as table, JSON, JSONL, CSV, TSV, or URLs.
 
-mvn is an independent tool and is not affiliated with Maven Central or Sonatype.`,
+maven is an independent tool and is not affiliated with Maven Central or Sonatype.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
